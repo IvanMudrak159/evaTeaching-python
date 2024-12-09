@@ -6,14 +6,14 @@ import random
 import utils
 
 POP_SIZE = 100 # population size
-MAX_GEN = 500 # maximum number of generations
+MAX_GEN = 2500 # maximum number of generations
 CX_PROB = 0.8 # crossover probability
 MUT_PROB = 0.2 # mutation probability
 MUT_MAX_LEN = 10 # maximum lenght of the swapped part
 REPEATS = 10 # number of runs of algorithm (should be at least 10)
 INPUT = 'inputs/tsp_std.in' # the input file
-OUT_DIR = 'tsp' # output directory for logs
-EXP_ID = 'default' # the ID of this experiment (used to create log names)
+OUT_DIR = 'tsp/distance' # output directory for logs
+LOCATIONS = []
 
 # reads the input set of values of objects
 def read_locations(filename):
@@ -98,6 +98,60 @@ def order_cross(p1, p2):
 
     return o1, o2
 
+import random
+
+def distance_based_crossover(parent1, parent2):
+    size = len(parent1)
+    current_city = random.choice(parent1)
+    child = [current_city]
+    while len(child) < size:
+        idx1 = (parent1.index(current_city) + 1) % size
+        idx2 = (parent2.index(current_city) + 1) % size
+        
+        next_city1 = parent1[idx1]
+        next_city2 = parent2[idx2]
+        if distance(LOCATIONS[current_city], LOCATIONS[next_city1]) < distance(LOCATIONS[current_city], LOCATIONS[next_city2]):
+            next_city = next_city1
+        else:
+            next_city = next_city2
+        
+        while next_city in child:
+            if next_city == next_city1:
+                idx1 = (idx1 + 1) % size
+                next_city1 = parent1[idx1]
+            else:
+                idx2 = (idx2 + 1) % size
+                next_city2 = parent2[idx2]
+            
+            next_city = next_city1 if distance(LOCATIONS[current_city], LOCATIONS[next_city1]) < distance(LOCATIONS[current_city], LOCATIONS[next_city2]) else next_city2
+        
+        child.append(next_city)
+        current_city = next_city
+    
+    return child
+
+def direct_insertion_crossover(parent1, parent2):
+    size = len(parent1)
+    start, end = sorted(random.sample(range(size), 2))
+    segment = parent1[start:end + 1]
+    
+    child1 = [city for city in parent2 if city not in segment]
+    child1 = child1[:start] + segment + child1[start:]
+    
+    segment2 = parent2[start:end + 1]  # Select the same range from parent2
+    child2 = [city for city in parent1 if city not in segment2]
+    child2 = child2[:start] + segment2 + child2[start:]
+    
+    child1 = remove_duplicates(child1)
+    child2 = remove_duplicates(child2)
+    
+    return child1, child2
+
+def remove_duplicates(child):
+    seen = set()
+    return [city for city in child if not (city in seen or seen.add(city))]
+
+
 # implements the swapping mutation of one individual
 def swap_mutate(p, max_len):
     source = random.randrange(1, len(p) - 1)
@@ -134,10 +188,29 @@ def crossover(pop, cross, cx_prob):
         off.append(o2)
     return off
 
+# applies the cross function (implementing the crossover of two individuals)
+# to the whole population (with probability cx_prob)
+def crossover_onechild(pop, cross, cx_prob):
+    off = []
+    for p1, p2 in zip(pop[0::2], pop[1::2]):
+        if random.random() < cx_prob:
+            o = cross(p1, p2)
+        else:
+            o = p1[:]
+        off.append(o)
+    return off
+
+
 # applies the mutate function (implementing the mutation of a single individual)
 # to the whole population with probability mut_prob)
 def mutation(pop, mutate, mut_prob):
     return [mutate(p) if random.random() < mut_prob else p[:] for p in pop]
+
+def inversion_mutation(individual):
+    size = len(individual)
+    start, end = sorted(random.sample(range(size), 2))
+    individual[start:end+1] = reversed(individual[start:end+1])
+    return individual
 
 # implements the evolutionary algorithm
 # arguments:
@@ -173,21 +246,21 @@ def evolutionary_algorithm(pop, max_gen, fitness, operators, mate_sel, *, map_fn
 if __name__ == '__main__':
     # read the locations from input
     locations = read_locations(INPUT)
-
+    LOCATIONS = locations
     # use `functool.partial` to create fix some arguments of the functions 
     # and create functions with required signatures
     cr_ind = functools.partial(create_ind, ind_len=len(locations))
     fit = functools.partial(fitness, cities=locations)
-    xover = functools.partial(crossover, cross=order_cross, cx_prob=CX_PROB)
+    xover = functools.partial(crossover_onechild, cross=distance_based_crossover, cx_prob=CX_PROB)
     mut = functools.partial(mutation, mut_prob=MUT_PROB, 
-                            mutate=functools.partial(swap_mutate, max_len=MUT_MAX_LEN))
+                            mutate=functools.partial(inversion_mutation))
 
     # we can use multiprocessing to evaluate fitness in parallel
     import multiprocessing
     pool = multiprocessing.Pool()
 
     import matplotlib.pyplot as plt
-
+    EXP_ID = 'distance_based_crossover + inversion_mutation (gen=2500)' # the ID of this experiment (used to create log names)
     # run the algorithm `REPEATS` times and remember the best solutions from 
     # last generations
     best_inds = []
